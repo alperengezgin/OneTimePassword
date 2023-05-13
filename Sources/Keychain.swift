@@ -30,7 +30,17 @@ import Foundation
 public final class Keychain {
     /// The singleton `Keychain` instance.
     public static let sharedInstance = Keychain()
-
+    
+    public var iCloudEnabled = kCFBooleanFalse
+    
+    public func changeiCloudEnabledStatus(isEnabled: Bool) {
+        if isEnabled {
+            iCloudEnabled = kCFBooleanTrue
+        } else {
+            iCloudEnabled = kCFBooleanFalse
+        }
+    }
+    
     // MARK: Read
 
     /// Finds the persistent token with the given identifer, if one exists.
@@ -123,6 +133,7 @@ private extension Token {
             kSecAttrGeneric as String:  data as NSData,
             kSecValueData as String:    generator.secret as NSData,
             kSecAttrService as String:  kOTPService as NSString,
+            kSecAttrSynchronizable as String: Keychain.sharedInstance.iCloudEnabled ?? kCFBooleanFalse
         ]
     }
 }
@@ -212,6 +223,7 @@ private func keychainItem(forPersistentRef persistentRef: Data) throws -> NSDict
         kSecReturnPersistentRef as String:  kCFBooleanTrue,
         kSecReturnAttributes as String:     kCFBooleanTrue,
         kSecReturnData as String:           kCFBooleanTrue,
+        kSecAttrSynchronizable as String:   Keychain.sharedInstance.iCloudEnabled ?? kCFBooleanFalse
     ]
 
     var result: AnyObject?
@@ -239,6 +251,7 @@ private func allKeychainItems() throws -> [NSDictionary] {
         kSecReturnPersistentRef as String:  kCFBooleanTrue,
         kSecReturnAttributes as String:     kCFBooleanTrue,
         kSecReturnData as String:           kCFBooleanTrue,
+        kSecAttrSynchronizable as String:   Keychain.sharedInstance.iCloudEnabled ?? kCFBooleanFalse
     ]
 
     var result: AnyObject?
@@ -258,3 +271,4 @@ private func allKeychainItems() throws -> [NSDictionary] {
     }
     return keychainItems
 }
+
