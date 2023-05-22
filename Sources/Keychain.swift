@@ -31,18 +31,70 @@ public final class Keychain {
     /// The singleton `Keychain` instance.
     public static let sharedInstance = Keychain()
     
-    public var iCloudEnabled = kCFBooleanFalse
+    public var iCloudEnabled: CFBoolean = kCFBooleanFalse
+    
+    private let cloudKey = "sync"
     
     public func changeiCloudEnabledStatus(isEnabled: Bool) {
+        
+        var tmp = false
+        
         if isEnabled {
             iCloudEnabled = kCFBooleanTrue
+            tmp = true
         } else {
             iCloudEnabled = kCFBooleanFalse
+            tmp = false
+        }
+        
+        let status = updateSyncStatus(key: cloudKey, data: Data(from: tmp))
+        print(status)
+    }
+    
+    private init() {
+        var tmp = getSyncStatus(key: cloudKey)?.to(type: Bool.self) ?? false
+        self.iCloudEnabled = tmp ? kCFBooleanTrue : kCFBooleanFalse
+    }
+    
+    public func fetchSyncStatus(completion: @escaping (_ value: Bool) -> ()) {
+        var tmp = getSyncStatus(key: cloudKey)?.to(type: Bool.self) ?? false
+        self.iCloudEnabled = tmp ? kCFBooleanTrue : kCFBooleanFalse
+        completion(tmp)
+    }
+    
+    private func updateSyncStatus(key: String, data: Data) -> OSStatus {
+        let query = [
+            kSecClass as String       : kSecClassGenericPassword as String,
+            kSecAttrAccount as String : key,
+            kSecValueData as String   : data,
+            kSecAttrSynchronizable as String: kCFBooleanTrue ] as [String : Any]
+        
+        SecItemDelete(query as CFDictionary)
+        
+        return SecItemAdd(query as CFDictionary, nil)
+    }
+    
+    func getSyncStatus(key: String) -> Data? {
+        let query = [
+            kSecClass as String       : kSecClassGenericPassword,
+            kSecAttrAccount as String : key,
+            kSecReturnData as String  : kCFBooleanTrue!,
+            kSecMatchLimit as String  : kSecMatchLimitOne,
+            kSecAttrSynchronizable as String: kCFBooleanTrue ] as [String : Any]
+        
+        var dataTypeRef: AnyObject? = nil
+        
+        let status: OSStatus = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
+        
+        if status == noErr {
+            return dataTypeRef as! Data?
+        } else {
+            return nil
         }
     }
     
     // MARK: Read
-
+    
     /// Finds the persistent token with the given identifer, if one exists.
     ///
     /// - parameter identifier: The persistent identifier for the desired token.
@@ -52,7 +104,7 @@ public final class Keychain {
     public func persistentToken(withIdentifier identifier: Data) throws -> PersistentToken? {
         return try keychainItem(forPersistentRef: identifier).map(PersistentToken.init(keychainDictionary:))
     }
-
+    
     /// Returns the set of all persistent tokens found in the keychain.
     ///
     /// - throws: A `Keychain.Error` if an error occurred.
@@ -64,9 +116,9 @@ public final class Keychain {
         //       the caller to choose whether to fail completely or recover some data.
         return Set(allItems.compactMap({ try? PersistentToken(keychainDictionary: $0) }))
     }
-
+    
     // MARK: Write
-
+    
     /// Adds the given token to the keychain and returns the persistent token which contains it.
     ///
     /// - parameter token: The token to save to the keychain.
@@ -78,7 +130,7 @@ public final class Keychain {
         let persistentRef = try addKeychainItem(withAttributes: attributes)
         return PersistentToken(token: token, identifier: persistentRef)
     }
-
+    
     /// Updates the given persistent token with a new token value.
     ///
     /// - parameter persistentToken: The persistent token to update.
@@ -92,7 +144,7 @@ public final class Keychain {
                                withAttributes: attributes)
         return PersistentToken(token: token, identifier: persistentToken.identifier)
     }
-
+    
     /// Deletes the given persistent token from the keychain.
     ///
     /// - note: After calling `deletePersistentToken(_:)`, the persistent token's `identifier` is no
@@ -104,9 +156,9 @@ public final class Keychain {
     public func delete(_ persistentToken: PersistentToken) throws {
         try deleteKeychainItem(forPersistentRef: persistentToken.identifier)
     }
-
+    
     // MARK: Errors
-
+    
     /// An error type enum representing the various errors a `Keychain` operation can throw.
     public enum Error: Swift.Error {
         /// The keychain operation returned a system error code.
@@ -145,7 +197,7 @@ private extension PersistentToken {
         case missingPersistentRef
         case unreadableData
     }
-
+    
     init(keychainDictionary: NSDictionary) throws {
         guard let urlData = keychainDictionary[kSecAttrGeneric as String] as? Data else {
             throw DeserializationError.missingData
@@ -157,8 +209,8 @@ private extension PersistentToken {
             throw DeserializationError.missingPersistentRef
         }
         guard let urlString = String(data: urlData, encoding: urlStringEncoding),
-            let url = URL(string: urlString) else {
-                throw DeserializationError.unreadableData
+              let url = URL(string: urlString) else {
+            throw DeserializationError.unreadableData
         }
         let token = try Token(_url: url, secret: secret)
         self.init(token: token, identifier: keychainItemRef)
@@ -174,12 +226,12 @@ private func addKeychainItem(withAttributes attributes: [String: AnyObject]) thr
     if mutableAttributes[kSecAttrAccount as String] == nil {
         mutableAttributes[kSecAttrAccount as String] = UUID().uuidString as NSString
     }
-
+    
     var result: AnyObject?
     let resultCode: OSStatus = withUnsafeMutablePointer(to: &result) {
         SecItemAdd(mutableAttributes as CFDictionary, $0)
     }
-
+    
     guard resultCode == errSecSuccess else {
         throw Keychain.Error.systemError(resultCode)
     }
@@ -195,9 +247,9 @@ private func updateKeychainItem(forPersistentRef persistentRef: Data,
         kSecClass as String:               kSecClassGenericPassword,
         kSecValuePersistentRef as String:  persistentRef as NSData,
     ]
-
+    
     let resultCode = SecItemUpdate(queryDict as CFDictionary, attributesToUpdate as CFDictionary)
-
+    
     guard resultCode == errSecSuccess else {
         throw Keychain.Error.systemError(resultCode)
     }
@@ -208,9 +260,9 @@ private func deleteKeychainItem(forPersistentRef persistentRef: Data) throws {
         kSecClass as String:               kSecClassGenericPassword,
         kSecValuePersistentRef as String:  persistentRef as NSData,
     ]
-
+    
     let resultCode = SecItemDelete(queryDict as CFDictionary)
-
+    
     guard resultCode == errSecSuccess else {
         throw Keychain.Error.systemError(resultCode)
     }
@@ -225,12 +277,12 @@ private func keychainItem(forPersistentRef persistentRef: Data) throws -> NSDict
         kSecReturnData as String:           kCFBooleanTrue,
         kSecAttrSynchronizable as String:   Keychain.sharedInstance.iCloudEnabled ?? kCFBooleanFalse
     ]
-
+    
     var result: AnyObject?
     let resultCode = withUnsafeMutablePointer(to: &result) {
         SecItemCopyMatching(queryDict as CFDictionary, $0)
     }
-
+    
     if resultCode == errSecItemNotFound {
         // Not finding any keychain items is not an error in this case. Return nil.
         return nil
@@ -253,12 +305,12 @@ private func allKeychainItems() throws -> [NSDictionary] {
         kSecReturnData as String:           kCFBooleanTrue,
         kSecAttrSynchronizable as String:   Keychain.sharedInstance.iCloudEnabled ?? kCFBooleanFalse
     ]
-
+    
     var result: AnyObject?
     let resultCode = withUnsafeMutablePointer(to: &result) {
         SecItemCopyMatching(queryDict as CFDictionary, $0)
     }
-
+    
     if resultCode == errSecItemNotFound {
         // Not finding any keychain items is not an error in this case. Return an empty array.
         return []
@@ -271,4 +323,17 @@ private func allKeychainItems() throws -> [NSDictionary] {
     }
     return keychainItems
 }
+
+extension Data {
+    
+    init<T>(from value: T) {
+        var value = value
+        self.init(buffer: UnsafeBufferPointer(start: &value, count: 1))
+    }
+    
+    func to<T>(type: T.Type) -> T {
+        return self.withUnsafeBytes { $0.load(as: T.self) }
+    }
+}
+
 
